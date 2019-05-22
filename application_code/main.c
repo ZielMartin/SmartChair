@@ -26,9 +26,10 @@
 /* FreeRTOS includes. */
 #include "FreeRTOS.h"
 #include "task.h"
+#include "semphr.h"
+#include "queue.h"
 
 /* Demo includes */
-#include "aws_demo_runner.h"
 #include "aws_dev_mode_key_provisioning.h"
 
 /* AWS System includes. */
@@ -47,10 +48,35 @@
 /* Application version info. */
 #include "aws_application_version.h"
 
+/* Demo configurations. */
+#include "aws_demo_config.h"
+
+/* Required for shadow APIs. */
+#include "aws_shadow.h"
+
+#include <freertos/task.h>
+
 /* Logging Task Defines. */
 #define mainLOGGING_MESSAGE_QUEUE_LENGTH    ( 32 )
 #define mainLOGGING_TASK_STACK_SIZE         ( configMINIMAL_STACK_SIZE * 6 )
 #define mainDEVICE_NICK_NAME                "Espressif_Demo"
+
+#define shadowREPORTED_JSON             \
+    "{"                                 \
+    "\"state\":{"                       \
+    "\"reported\":{"                    \
+    "\"rssi\":\"20\""                   \
+    "}"                                 \
+    "},"                                \
+    "\"clientToken\": \"token-4g7rd1\"" \
+    "}"
+
+/* Shadow Task defines. */
+#define shadowBUFFER_LENGTH 256
+#define shadowTASK_STACK_SIZE (configMINIMAL_STACK_SIZE * 4)
+#define shadowTIMEOUT pdMS_TO_TICKS(30000UL)
+#define shadowMAX_TOKENS 40
+#define shadowTHING_NAME clientcredentialIOT_THING_NAME
 
 /* Declare the firmware version structure for all to see. */
 const AppVersion32_t xAppFirmwareVersion = {
@@ -158,7 +184,14 @@ int app_main( void )
         vDevModeKeyProvisioning();
 
         /* Run all demos. */
-        DEMO_RUNNER_RunDemos();
+        // DEMO_RUNNER_RunDemos();
+
+        (void)xTaskCreate(prvShadowInitTask,
+                          "ShadowTask",
+                          configMINIMAL_STACK_SIZE * 4,
+                          NULL,
+                          tskIDLE_PRIORITY,
+                          NULL);
     }
 
     /* Start the scheduler.  Initialization that requires the OS to be running,
@@ -402,3 +435,124 @@ void vApplicationIPNetworkEventHook( eIPCallbackEvent_t eNetworkEvent )
         esp_event_send(&evt);
     }
 }
+
+
+/*-----------------------------------------------------------*/
+
+static ShadowReturnCode_t prvShadowClientCreateConnect(void)
+{
+    MQTTAgentConnectParams_t xConnectParams;
+    ShadowCreateParams_t xCreateParams;
+    ShadowReturnCode_t xReturn;
+
+    xCreateParams.xMQTTClientType = eDedicatedMQTTClient;
+    xReturn = SHADOW_ClientCreate(&xClientHandle, &xCreateParams);
+
+    if (xReturn == eShadowSuccess)
+    {
+        memset(&xConnectParams, 0x00, sizeof(xConnectParams));
+        xConnectParams.pcURL = clientcredentialMQTT_BROKER_ENDPOINT;
+        xConnectParams.usPort = clientcredentialMQTT_BROKER_PORT;
+
+        xConnectParams.xFlags = democonfigMQTT_AGENT_CONNECT_FLAGS;
+        xConnectParams.pcCertificate = NULL;
+        xConnectParams.ulCertificateSize = 0;
+        xConnectParams.pxCallback = NULL;
+        xConnectParams.pvUserData = &xClientHandle;
+
+        xConnectParams.pucClientId = (const uint8_t *)(clientcredentialIOT_THING_NAME);
+        xConnectParams.usClientIdLength = (uint16_t)strlen(clientcredentialIOT_THING_NAME);
+
+        configPRINTF(("Trying to connect to: %s.\r\n", clientcredentialMQTT_BROKER_ENDPOINT));
+
+        xReturn = SHADOW_ClientConnect(xClientHandle,
+                                       &xConnectParams,
+                                       shadowTIMEOUT);
+
+        if (xReturn != eShadowSuccess)
+        {
+            configPRINTF(("Shadow_ClientConnect unsuccessful, returned %d.\r\n", xReturn));
+        }
+    }
+    else
+    {
+        configPRINTF(("Shadow_ClientCreate unsuccessful, returned %d.\r\n", xReturn));
+    }
+
+    return xReturn;
+}
+
+/*-----------------------------------------------------------*/
+
+static void prvUpdateShadow(void *pvParameters)
+{
+    uint32_t ulUpdateBufferLength;
+    char pcUpdateBuffer[shadowBUFFER_LENGTH];
+
+    ulUpdateBufferLength = (uint32_t)snprintf((char *)pcUpdateBuffer,
+                                              shadowBUFFER_LENGTH,
+                                              shadowREPORTED_JSON);
+
+    ShadowReturnCode_t xReturn;
+
+    ShadowOperationParams_t xUpdateParams;
+    xUpdateParams.pcThingName = clientcredentialIOT_THING_NAME;
+    xUpdateParams.xQoS = eMQTTQoS0;
+    xUpdateParams.pcData = pcUpdateBuffer;
+    xUpdateParams.ucKeepSubscriptions = pdTRUE;
+    xUpdateParams.ulDataLength = ulUpdateBufferLength;
+
+    configPRINTF(("Trying to update shadow.\r\n"));
+
+    xReturn = SHADOW_Update(xClientHandle, &xUpdateParams, shadowTIMEOUT);
+
+    if (xReturn == eShadowSuccess)
+    {
+        configPRINTF(("Successfully performed update.\r\n"));
+    }
+    else
+    {
+        configPRINTF(("Update failed, returned %d.\r\n", xReturn));
+    }
+
+    vTaskDelete(NULL);
+}
+
+/*-----------------------------------------------------------*/
+
+static void prvShadowInitTask(void *pvParameters)
+{
+    ShadowReturnCode_t xReturn;
+    ShadowCallbackParams_t xCallbackParams;
+
+    (void)pvParameters;
+
+    xReturn = prvShadowClientCreateConnect();
+
+    if (xReturn == eShadowSuccess)
+    {
+        configPRINTF(("Shadow client initialized.\r\n"));
+
+        xCallbackParams.pcThingName = clientcredentialIOT_THING_NAME;
+        xCallbackParams.xShadowUpdatedCallback = NULL;
+        xCallbackParams.xShadowDeletedCallback = NULL;
+        xCallbackParams.xShadowDeltaCallback = prvDeltaCallback;
+
+        xReturn = SHADOW_RegisterCallbacks(xClientHandle,
+                                           &xCallbackParams,
+                                           shadowTIMEOUT);
+
+        configPRINTF(("Shadow client callback registered.\r\n"));
+
+        (void)xTaskCreate(prvUpdateShadow,
+                          "UpdateShadowTask",
+                          shadowTASK_STACK_SIZE,
+                          NULL,
+                          tskIDLE_PRIORITY,
+                          NULL);
+    }
+
+    vTaskDelete(NULL);
+}
+
+/*-----------------------------------------------------------*/
