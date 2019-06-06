@@ -56,6 +56,8 @@
 
 #include <freertos/task.h>
 
+#include "bmi055.h"
+
 /* Logging Task Defines. */
 #define mainLOGGING_MESSAGE_QUEUE_LENGTH    ( 32 )
 #define mainLOGGING_TASK_STACK_SIZE         ( configMINIMAL_STACK_SIZE * 6 )
@@ -176,7 +178,7 @@ int app_main( void )
     if( SYSTEM_Init() == pdPASS )
     {
         /* Connect to the wifi before running the demos */
-        prvWifiConnect();
+        // prvWifiCon   nect();
 
         /* A simple example to demonstrate key and certificate provisioning in
         * microcontroller flash using PKCS#11 interface. This should be replaced
@@ -186,12 +188,17 @@ int app_main( void )
         /* Run all demos. */
         // DEMO_RUNNER_RunDemos();
 
-        (void)xTaskCreate(prvShadowInitTask,
-                          "ShadowTask",
-                          configMINIMAL_STACK_SIZE * 4,
-                          NULL,
-                          tskIDLE_PRIORITY,
-                          NULL);
+        initializeI2C();
+        for(;;) {
+            updateAccelerometer();
+        }
+
+        // (void)xTaskCreate(prvShadowInitTask,
+        //                   "ShadowTask",
+        //                   configMINIMAL_STACK_SIZE * 4,
+        //                   NULL,
+        //                   tskIDLE_PRIORITY,
+        //                   NULL);
     }
 
     /* Start the scheduler.  Initialization that requires the OS to be running,
@@ -439,120 +446,120 @@ void vApplicationIPNetworkEventHook( eIPCallbackEvent_t eNetworkEvent )
 
 /*-----------------------------------------------------------*/
 
-static ShadowReturnCode_t prvShadowClientCreateConnect(void)
-{
-    MQTTAgentConnectParams_t xConnectParams;
-    ShadowCreateParams_t xCreateParams;
-    ShadowReturnCode_t xReturn;
+// static ShadowReturnCode_t prvShadowClientCreateConnect(void)
+// {
+//     MQTTAgentConnectParams_t xConnectParams;
+//     ShadowCreateParams_t xCreateParams;
+//     ShadowReturnCode_t xReturn;
 
-    xCreateParams.xMQTTClientType = eDedicatedMQTTClient;
-    xReturn = SHADOW_ClientCreate(&xClientHandle, &xCreateParams);
+//     xCreateParams.xMQTTClientType = eDedicatedMQTTClient;
+//     xReturn = SHADOW_ClientCreate(&xClientHandle, &xCreateParams);
 
-    if (xReturn == eShadowSuccess)
-    {
-        memset(&xConnectParams, 0x00, sizeof(xConnectParams));
-        xConnectParams.pcURL = clientcredentialMQTT_BROKER_ENDPOINT;
-        xConnectParams.usPort = clientcredentialMQTT_BROKER_PORT;
+//     if (xReturn == eShadowSuccess)
+//     {
+//         memset(&xConnectParams, 0x00, sizeof(xConnectParams));
+//         xConnectParams.pcURL = clientcredentialMQTT_BROKER_ENDPOINT;
+//         xConnectParams.usPort = clientcredentialMQTT_BROKER_PORT;
 
-        xConnectParams.xFlags = democonfigMQTT_AGENT_CONNECT_FLAGS;
-        xConnectParams.pcCertificate = NULL;
-        xConnectParams.ulCertificateSize = 0;
-        xConnectParams.pxCallback = NULL;
-        xConnectParams.pvUserData = &xClientHandle;
+//         xConnectParams.xFlags = democonfigMQTT_AGENT_CONNECT_FLAGS;
+//         xConnectParams.pcCertificate = NULL;
+//         xConnectParams.ulCertificateSize = 0;
+//         xConnectParams.pxCallback = NULL;
+//         xConnectParams.pvUserData = &xClientHandle;
 
-        xConnectParams.pucClientId = (const uint8_t *)(clientcredentialIOT_THING_NAME);
-        xConnectParams.usClientIdLength = (uint16_t)strlen(clientcredentialIOT_THING_NAME);
+//         xConnectParams.pucClientId = (const uint8_t *)(clientcredentialIOT_THING_NAME);
+//         xConnectParams.usClientIdLength = (uint16_t)strlen(clientcredentialIOT_THING_NAME);
 
-        configPRINTF(("Trying to connect to: %s.\r\n", clientcredentialMQTT_BROKER_ENDPOINT));
+//         configPRINTF(("Trying to connect to: %s.\r\n", clientcredentialMQTT_BROKER_ENDPOINT));
 
-        xReturn = SHADOW_ClientConnect(xClientHandle,
-                                       &xConnectParams,
-                                       shadowTIMEOUT);
+//         xReturn = SHADOW_ClientConnect(xClientHandle,
+//                                        &xConnectParams,
+//                                        shadowTIMEOUT);
 
-        if (xReturn != eShadowSuccess)
-        {
-            configPRINTF(("Shadow_ClientConnect unsuccessful, returned %d.\r\n", xReturn));
-        }
-    }
-    else
-    {
-        configPRINTF(("Shadow_ClientCreate unsuccessful, returned %d.\r\n", xReturn));
-    }
+//         if (xReturn != eShadowSuccess)
+//         {
+//             configPRINTF(("Shadow_ClientConnect unsuccessful, returned %d.\r\n", xReturn));
+//         }
+//     }
+//     else
+//     {
+//         configPRINTF(("Shadow_ClientCreate unsuccessful, returned %d.\r\n", xReturn));
+//     }
 
-    return xReturn;
-}
+//     return xReturn;
+// }
 
-/*-----------------------------------------------------------*/
+// /*-----------------------------------------------------------*/
 
-static void prvUpdateShadow(void *pvParameters)
-{
-    uint32_t ulUpdateBufferLength;
-    char pcUpdateBuffer[shadowBUFFER_LENGTH];
+// static void prvUpdateShadow(void *pvParameters)
+// {
+//     uint32_t ulUpdateBufferLength;
+//     char pcUpdateBuffer[shadowBUFFER_LENGTH];
 
-    ulUpdateBufferLength = (uint32_t)snprintf((char *)pcUpdateBuffer,
-                                              shadowBUFFER_LENGTH,
-                                              shadowREPORTED_JSON);
+//     ulUpdateBufferLength = (uint32_t)snprintf((char *)pcUpdateBuffer,
+//                                               shadowBUFFER_LENGTH,
+//                                               shadowREPORTED_JSON);
 
-    ShadowReturnCode_t xReturn;
+//     ShadowReturnCode_t xReturn;
 
-    ShadowOperationParams_t xUpdateParams;
-    xUpdateParams.pcThingName = clientcredentialIOT_THING_NAME;
-    xUpdateParams.xQoS = eMQTTQoS0;
-    xUpdateParams.pcData = pcUpdateBuffer;
-    xUpdateParams.ucKeepSubscriptions = pdTRUE;
-    xUpdateParams.ulDataLength = ulUpdateBufferLength;
+//     ShadowOperationParams_t xUpdateParams;
+//     xUpdateParams.pcThingName = clientcredentialIOT_THING_NAME;
+//     xUpdateParams.xQoS = eMQTTQoS0;
+//     xUpdateParams.pcData = pcUpdateBuffer;
+//     xUpdateParams.ucKeepSubscriptions = pdTRUE;
+//     xUpdateParams.ulDataLength = ulUpdateBufferLength;
 
-    configPRINTF(("Trying to update shadow.\r\n"));
+//     configPRINTF(("Trying to update shadow.\r\n"));
 
-    xReturn = SHADOW_Update(xClientHandle, &xUpdateParams, shadowTIMEOUT);
+//     xReturn = SHADOW_Update(xClientHandle, &xUpdateParams, shadowTIMEOUT);
 
-    if (xReturn == eShadowSuccess)
-    {
-        configPRINTF(("Successfully performed update.\r\n"));
-    }
-    else
-    {
-        configPRINTF(("Update failed, returned %d.\r\n", xReturn));
-    }
+//     if (xReturn == eShadowSuccess)
+//     {
+//         configPRINTF(("Successfully performed update.\r\n"));
+//     }
+//     else
+//     {
+//         configPRINTF(("Update failed, returned %d.\r\n", xReturn));
+//     }
 
-    vTaskDelete(NULL);
-}
+//     vTaskDelete(NULL);
+// }
 
-/*-----------------------------------------------------------*/
+// /*-----------------------------------------------------------*/
 
-static void prvShadowInitTask(void *pvParameters)
-{
-    ShadowReturnCode_t xReturn;
-    ShadowCallbackParams_t xCallbackParams;
+// static void prvShadowInitTask(void *pvParameters)
+// {
+//     ShadowReturnCode_t xReturn;
+//     ShadowCallbackParams_t xCallbackParams;
 
-    (void)pvParameters;
+//     (void)pvParameters;
 
-    xReturn = prvShadowClientCreateConnect();
+//     xReturn = prvShadowClientCreateConnect();
 
-    if (xReturn == eShadowSuccess)
-    {
-        configPRINTF(("Shadow client initialized.\r\n"));
+//     if (xReturn == eShadowSuccess)
+//     {
+//         configPRINTF(("Shadow client initialized.\r\n"));
 
-        xCallbackParams.pcThingName = clientcredentialIOT_THING_NAME;
-        xCallbackParams.xShadowUpdatedCallback = NULL;
-        xCallbackParams.xShadowDeletedCallback = NULL;
-        xCallbackParams.xShadowDeltaCallback = prvDeltaCallback;
+//         xCallbackParams.pcThingName = clientcredentialIOT_THING_NAME;
+//         xCallbackParams.xShadowUpdatedCallback = NULL;
+//         xCallbackParams.xShadowDeletedCallback = NULL;
+//         xCallbackParams.xShadowDeltaCallback = prvDeltaCallback;
 
-        xReturn = SHADOW_RegisterCallbacks(xClientHandle,
-                                           &xCallbackParams,
-                                           shadowTIMEOUT);
+//         xReturn = SHADOW_RegisterCallbacks(xClientHandle,
+//                                            &xCallbackParams,
+//                                            shadowTIMEOUT);
 
-        configPRINTF(("Shadow client callback registered.\r\n"));
+//         configPRINTF(("Shadow client callback registered.\r\n"));
 
-        (void)xTaskCreate(prvUpdateShadow,
-                          "UpdateShadowTask",
-                          shadowTASK_STACK_SIZE,
-                          NULL,
-                          tskIDLE_PRIORITY,
-                          NULL);
-    }
+//         (void)xTaskCreate(prvUpdateShadow,
+//                           "UpdateShadowTask",
+//                           shadowTASK_STACK_SIZE,
+//                           NULL,
+//                           tskIDLE_PRIORITY,
+//                           NULL);
+//     }
 
-    vTaskDelete(NULL);
-}
+//     vTaskDelete(NULL);
+// }
 
 /*-----------------------------------------------------------*/
